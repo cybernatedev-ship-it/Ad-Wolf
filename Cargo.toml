@@ -1,0 +1,13 @@
+[package]
+name = "rust-dns-ad-filter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+trust-dns-proto = "0.23"
+dashmap = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
