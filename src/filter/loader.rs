@@ -1,13 +1,16 @@
-use std::path::Path;
-use tokio::fs;
+use std::{fs, path::Path};
 
-use super::engine::RuleEngine;
-use super::parser::parse_line;
+use anyhow::Result;
 
-pub async fn load_rules(list_dir: &str) -> anyhow::Result<RuleEngine> {
-    let path = Path::new(list_dir);
+use crate::rules::{
+    engine::RuleEngine,
+    parser::parse_rule,
+};
+
+pub async fn load_rules<P: AsRef<Path>>(dir: P) -> Result<RuleEngine> {
     let mut domains = Vec::new();
 
+<<<<<<< HEAD:src/filter/loader.rs
     // Try to read directory, but don't fail if it doesn't exist yet
     let mut entries = match fs::read_dir(path).await {
         Ok(e) => e,
@@ -22,23 +25,24 @@ pub async fn load_rules(list_dir: &str) -> anyhow::Result<RuleEngine> {
     };
 
     while let Some(entry) = entries.next_entry().await? {
+=======
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+>>>>>>> e9cac0d (Fix ResponseCode::NXDOMAIN to NXDomain):src/rules/loader.rs
         let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("txt") {
-            tracing::debug!("Loading rules from {}", path.display());
-            load_file(&path, &mut domains).await?;
+
+        if path.extension().and_then(|s| s.to_str()) != Some("txt") {
+            continue;
+        }
+
+        let contents = fs::read_to_string(path)?;
+
+        for line in contents.lines() {
+            if let Some(rule) = parse_rule(line) {
+                domains.push(rule.to_ascii_lowercase());
+            }
         }
     }
 
-    tracing::info!("Loaded {} rules", domains.len());
     Ok(RuleEngine::new(domains))
-}
-
-async fn load_file(path: &Path, domains: &mut Vec<String>) -> anyhow::Result<()> {
-    let content = fs::read_to_string(path).await?;
-    for line in content.lines() {
-        if let Some(domain) = parse_line(line) {
-            domains.push(domain);
-        }
-    }
-    Ok(())
 }

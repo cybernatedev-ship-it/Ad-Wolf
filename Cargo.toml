@@ -11,4 +11,16 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 
-[dev-dependencies]
+[package.metadata.bundle]
+name = "My App"
+identifier = "com.goldfang.myapp"
+icon = [
+    "icons/32x32.png",
+    "icons/128x128.png",
+    "icons/256x256.png",
+    "icons/512x512.png",
+]
+copyright = "Copyright (c) 2026"
+category = "Utility"
+short_description = "A ad blocking util"
+long_description = """A Util that blocks ads."""

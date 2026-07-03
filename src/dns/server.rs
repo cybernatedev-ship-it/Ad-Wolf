@@ -132,10 +132,18 @@ fn should_block(req: &Message, rules: &RuleEngine, log_queries: bool) -> bool {
         }
 
         if rules.is_blocked(&domain) {
+<<<<<<< HEAD
             if log_queries {
                 tracing::info!("BLOCKED: {}", domain);
             }
+=======
+            tracing::info!("BLOCKED: {}", domain);
+<<<<<<< HEAD
+>>>>>>> main
             true
+=======
+            resp.set_response_code(ResponseCode::NXDomain);
+>>>>>>> e9cac0d (Fix ResponseCode::NXDOMAIN to NXDomain)
         } else {
             if log_queries {
                 tracing::debug!("ALLOWED: {}", domain);
