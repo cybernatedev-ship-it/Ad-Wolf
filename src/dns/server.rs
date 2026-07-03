@@ -41,7 +41,7 @@ async fn handle_query(
 
         if rules.is_blocked(&domain) {
             tracing::info!("BLOCKED: {}", domain);
-            resp.set_response_code(ResponseCode::NXDOMAIN);
+            resp.set_response_code(ResponseCode::NXDomain);
         } else {
             tracing::debug!("ALLOWED: {}", domain);
             resp.set_response_code(ResponseCode::NoError);
