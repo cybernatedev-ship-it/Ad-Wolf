@@ -24,7 +24,7 @@ impl RuleEngine {
 
         // Suffix match (e.g., ads.example.com blocks foo.ads.example.com)
         for entry in self.blocked_domains.iter() {
-            if domain_lower.ends_with(&format!(".{}", entry.value())) {
+            if domain_lower.ends_with(&format!(".{}", entry.key())) {
                 return true;
             }
         }
