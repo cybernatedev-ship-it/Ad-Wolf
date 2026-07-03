@@ -14,10 +14,8 @@ pub fn parse_line(line: &str) -> Option<String> {
     }
 
     // Parse uBlock-style rules: ||domain.com^
-    let domain = if line.starts_with("||") && line.ends_with('^') {
-        &line[2..line.len() - 1]
-    } else if line.starts_with("||") {
-        &line[2..]
+    let domain = if let Some(stripped) = line.strip_prefix("||") {
+        stripped.strip_suffix('^').unwrap_or(stripped)
     } else {
         line
     };

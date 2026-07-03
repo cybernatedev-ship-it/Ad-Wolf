@@ -26,6 +26,24 @@ cargo run
 
 The server will listen on `127.0.0.1:5353` and load rules from `lists/*.txt`.
 
+## Configuration
+
+Runtime settings can be customized with an optional `config.toml` file. If the
+file is missing, the daemon uses defaults that match the current local-only
+development behavior.
+
+```toml
+listen = "127.0.0.1:5353"
+cache = true
+cache_ttl_seconds = 300
+log_queries = true
+list_dir = "lists"
+
+[[upstream]]
+protocol = "udp"
+address = "1.1.1.1:53"
+```
+
 ## Rule Formats
 
 Add rules to files in the `lists/` directory (e.g., `lists/custom.txt`):
