@@ -1,5 +1,5 @@
 /// Parse a single line from a rules file.
-/// 
+///
 /// Supports:
 /// - Plain domains: `ads.example.com`
 /// - uBlock-style rules: `||ads.example.com^`
@@ -36,12 +36,18 @@ mod tests {
 
     #[test]
     fn test_plain_domain() {
-        assert_eq!(parse_line("ads.example.com"), Some("ads.example.com".to_string()));
+        assert_eq!(
+            parse_line("ads.example.com"),
+            Some("ads.example.com".to_string())
+        );
     }
 
     #[test]
     fn test_ublock_rule() {
-        assert_eq!(parse_line("||ads.example.com^"), Some("ads.example.com".to_string()));
+        assert_eq!(
+            parse_line("||ads.example.com^"),
+            Some("ads.example.com".to_string())
+        );
     }
 
     #[test]

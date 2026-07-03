@@ -1,5 +1,5 @@
 mod dns;
-mod rules;
+mod filter;
 
 use std::sync::Arc;
 use tracing_subscriber;
@@ -9,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Load rules from lists/
-    let rules = Arc::new(rules::loader::load_rules("lists").await?);
+    let rules = Arc::new(filter::loader::load_rules("lists").await?);
     tracing::info!("Loaded rules with {} domains", rules.count());
 
     // Start DNS server
