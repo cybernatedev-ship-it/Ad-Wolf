@@ -12,7 +12,10 @@ pub async fn load_rules(list_dir: &str) -> anyhow::Result<RuleEngine> {
     let mut entries = match fs::read_dir(path).await {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            tracing::warn!("Rules directory {} not found, starting with empty rules", list_dir);
+            tracing::warn!(
+                "Rules directory {} not found, starting with empty rules",
+                list_dir
+            );
             return Ok(RuleEngine::new(vec![]));
         }
         Err(e) => return Err(e.into()),

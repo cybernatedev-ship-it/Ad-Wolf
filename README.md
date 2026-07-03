@@ -6,7 +6,9 @@ A fully local DNS filtering daemon written in Rust, inspired by Pi-hole and uBlo
 
 - **100% local** — No external APIs or cloud dependency
 - **DNS server** — Listens on `127.0.0.1:5353` (UDP)
-- **Rule engine** — Blocks domains from local filter lists
+- **Upstream forwarding** — Sends allowed queries to Cloudflare DNS (`1.1.1.1:53`)
+- **Response cache** — Reuses recent upstream DNS responses
+- **Filter engine** — Blocks domains from local filter lists
 - **Multiple formats** — Plain domains and uBlock-style rules
 - **Fast matching** — Uses `DashSet` for concurrent lookups
 
@@ -60,8 +62,10 @@ Should return `NXDOMAIN` for blocked domains, and normal responses for allowed d
 src/
   main.rs          — Entry point
   dns/
-    server.rs      — UDP DNS server
-  rules/
+    server.rs      — UDP DNS server and request handling
+    upstream.rs    — Upstream DNS forwarding
+    cache.rs       — DNS response cache
+  filter/
     engine.rs      — Rule matching engine
     parser.rs      — Rule file parser
     loader.rs      — Rule file loader
