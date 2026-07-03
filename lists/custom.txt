@@ -1,0 +1,10 @@
+! Example ad-blocking rules
+! Exact domains
+ads.example.com
+tracker.google.com
+
+! uBlock-style rules
+||doubleclick.net^
+||facebook.com^
+
+! Comments and empty lines are ignored
