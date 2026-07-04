@@ -1,6 +1,6 @@
 //! Filter engine with modular matcher system
 
-use dns_filter_core::Matcher;
+pub use dns_filter_core::{ExactMatcher, Matcher, SuffixMatcher};
 use std::sync::Arc;
 
 /// Rule engine combining multiple matchers with priority-based matching
@@ -27,6 +27,14 @@ impl RuleEngine {
     /// Get matcher count
     pub fn matcher_count(&self) -> usize {
         self.matchers.len()
+    }
+
+    /// Get matchers info for logging
+    pub fn matchers_info(&self) -> Vec<(String, &'static str)> {
+        self.matchers
+            .iter()
+            .map(|(name, matcher)| (name.clone(), matcher.name()))
+            .collect()
     }
 }
 
@@ -98,14 +106,19 @@ pub mod parser {
 pub mod loader {
     use super::parser::parse_line;
     use super::RuleEngine;
-    use dns_filter_core::ExactMatcher;
+    use crate::Matcher;
+    use dns_filter_core::{ExactMatcher, SuffixMatcher};
     use std::fs;
     use std::path::Path;
     use std::sync::Arc;
 
     /// Load rules from a directory containing .txt files
+    ///
+    /// Creates both an ExactMatcher and SuffixMatcher, splitting rules appropriately.
+    /// This provides optimal performance for both exact and suffix matching.
     pub fn load_rules<P: AsRef<Path>>(dir: P) -> anyhow::Result<RuleEngine> {
-        let mut domains = Vec::new();
+        let mut exact_domains = Vec::new();
+        let mut suffix_domains = Vec::new();
 
         // Try to read directory, but don't fail if it doesn't exist yet
         let entries = match fs::read_dir(dir.as_ref()) {
@@ -115,10 +128,10 @@ pub mod loader {
                     "Rules directory {} not found, starting with empty rules",
                     dir.as_ref().display()
                 );
-                let matcher = ExactMatcher::new(vec![]);
+                let exact_matcher = ExactMatcher::new(vec![]);
                 return Ok(RuleEngine::new(vec![(
-                    "empty".to_string(),
-                    Arc::new(matcher),
+                    "exact".to_string(),
+                    Arc::new(exact_matcher),
                 )]));
             }
             Err(e) => return Err(e.into()),
@@ -138,20 +151,59 @@ pub mod loader {
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown");
 
+            let mut file_exact_count = 0;
+            let mut file_suffix_count = 0;
+
             for line in contents.lines() {
                 if let Some(rule) = parse_line(line) {
-                    domains.push(rule);
+                    // Categorize: if it looks like a domain pattern (multiple labels), use suffix
+                    // Otherwise use exact matching
+                    let label_count = rule.split('.').count();
+                    if label_count > 1 {
+                        suffix_domains.push(rule);
+                        file_suffix_count += 1;
+                    } else {
+                        exact_domains.push(rule);
+                        file_exact_count += 1;
+                    }
                 }
             }
 
-            tracing::info!("Loaded {} rules from {}", domains.len(), file_name);
+            tracing::info!(
+                "Loaded {} rules from {} ({} exact, {} suffix)",
+                file_exact_count + file_suffix_count,
+                file_name,
+                file_exact_count,
+                file_suffix_count
+            );
         }
 
-        let matcher = ExactMatcher::new(domains.clone());
-        Ok(RuleEngine::new(vec![(
-            "exact".to_string(),
-            Arc::new(matcher),
-        )]))
+        let mut matchers: Vec<(String, Arc<dyn Matcher>)> = Vec::new();
+
+        // Add exact matcher (higher priority)
+        if !exact_domains.is_empty() {
+            let exact_matcher = ExactMatcher::new(exact_domains);
+            tracing::info!("Created ExactMatcher with {} rules", exact_matcher.count());
+            matchers.push(("exact".to_string(), Arc::new(exact_matcher)));
+        }
+
+        // Add suffix matcher (lower priority, checked after exact)
+        if !suffix_domains.is_empty() {
+            let suffix_matcher = SuffixMatcher::new(suffix_domains);
+            tracing::info!(
+                "Created SuffixMatcher with {} rules",
+                suffix_matcher.count()
+            );
+            matchers.push(("suffix".to_string(), Arc::new(suffix_matcher)));
+        }
+
+        // Ensure at least one matcher exists
+        if matchers.is_empty() {
+            let empty_exact = ExactMatcher::new(vec![]);
+            matchers.push(("exact".to_string(), Arc::new(empty_exact)));
+        }
+
+        Ok(RuleEngine::new(matchers))
     }
 }
 
