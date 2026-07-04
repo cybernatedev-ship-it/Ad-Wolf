@@ -15,6 +15,8 @@ use dns_filter_upstream::Upstream;
 
 const DEFAULT_UPSTREAM: &str = "1.1.1.1:53";
 const CACHE_TTL: Duration = Duration::from_secs(300);
+const MAX_UDP_PACKET: usize = 4096;
+const MAX_TCP_MESSAGE: u16 = 65535;
 
 /// DNS server configuration
 pub struct DnsServer {
@@ -44,7 +46,6 @@ pub async fn run_server(addr: &str, rules: Arc<RuleEngine>) -> anyhow::Result<()
     tracing::info!("DNS server listening on {} (UDP + TCP)", addr);
     tracing::info!("Forwarding allowed queries to {}", DEFAULT_UPSTREAM);
 
-    // Spawn UDP server
     let udp_addr = addr.to_string();
     let server_udp = DnsServer {
         rules: Arc::clone(&server.rules),
@@ -58,7 +59,6 @@ pub async fn run_server(addr: &str, rules: Arc<RuleEngine>) -> anyhow::Result<()
         }
     });
 
-    // Run TCP server in main thread
     run_tcp_server(addr, server).await?;
 
     Ok(())
@@ -70,7 +70,7 @@ async fn run_udp_server(addr: &str, server: DnsServer) -> anyhow::Result<()> {
     tracing::info!("UDP server bound to {}", addr);
 
     loop {
-        let mut buf = vec![0; 512];
+        let mut buf = vec![0; MAX_UDP_PACKET];
         let (n, peer_addr) = socket.recv_from(&mut buf).await?;
 
         let server = DnsServer {
@@ -117,9 +117,20 @@ async fn handle_udp_query(
     buf: &[u8],
     server: &DnsServer,
     socket: &UdpSocket,
-    peer_addr: std::net::SocketAddr,
+    peer_addr: SocketAddr,
 ) -> anyhow::Result<()> {
-    let response = handle_dns_query(buf, server).await?;
+    if buf.is_empty() {
+        return Ok(());
+    }
+
+    let response = match handle_dns_query(buf, server).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::debug!("DNS query error: {}", e);
+            return Ok(());
+        }
+    };
+
     socket.send_to(&response, peer_addr).await?;
     Ok(())
 }
@@ -130,33 +141,37 @@ async fn handle_tcp_client(
     server: &DnsServer,
 ) -> anyhow::Result<()> {
     loop {
-        // Read DNS query length (2 bytes, big-endian)
         let mut len_buf = [0; 2];
         match socket.read_exact(&mut len_buf).await {
-            Ok(0) => break, // Connection closed
+            Ok(0) => break,
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(e.into()),
         }
 
         let query_len = u16::from_be_bytes(len_buf) as usize;
-        if query_len > 65535 {
-            tracing::warn!("Query too large: {} bytes", query_len);
+        if query_len == 0 || query_len > MAX_TCP_MESSAGE as usize {
+            tracing::warn!("Invalid TCP query length: {}", query_len);
             break;
         }
 
-        // Read the DNS query
         let mut query_buf = vec![0; query_len];
-        socket.read_exact(&mut query_buf).await?;
+        if let Err(e) = socket.read_exact(&mut query_buf).await {
+            tracing::debug!("Failed to read TCP query body: {}", e);
+            break;
+        }
 
-        // Handle the query
         match handle_dns_query(&query_buf, server).await {
             Ok(response) => {
-                // Write response length
                 let response_len = (response.len() as u16).to_be_bytes();
-                socket.write_all(&response_len).await?;
-                // Write response
-                socket.write_all(&response).await?;
+                if let Err(e) = socket.write_all(&response_len).await {
+                    tracing::debug!("Failed to write TCP response length: {}", e);
+                    break;
+                }
+                if let Err(e) = socket.write_all(&response).await {
+                    tracing::debug!("Failed to write TCP response body: {}", e);
+                    break;
+                }
             }
             Err(e) => {
                 tracing::debug!("TCP query error: {}", e);
@@ -170,13 +185,20 @@ async fn handle_tcp_client(
 
 /// Handle a single DNS query (shared logic for UDP and TCP)
 async fn handle_dns_query(buf: &[u8], server: &DnsServer) -> anyhow::Result<Vec<u8>> {
-    let req = Message::from_bytes(buf)?;
+    let req = match Message::from_bytes(buf) {
+        Ok(msg) => msg,
+        Err(_) => {
+            return Ok(formerr_response().to_bytes()?);
+        }
+    };
+
+    if !is_valid_query(&req) {
+        return Ok(formerr_response().to_bytes()?);
+    }
 
     if should_block(&req, &server.rules) {
-        // Log blocked query
         for query in req.queries() {
-            let domain = query.name().to_utf8();
-            server.stats.record_blocked(&domain);
+            server.stats.record_blocked(&domain_from_name(query.name()));
         }
         let response_bytes = blocked_response(&req).to_bytes()?;
         return Ok(response_bytes);
@@ -189,21 +211,44 @@ async fn handle_dns_query(buf: &[u8], server: &DnsServer) -> anyhow::Result<Vec<
     }
 
     server.stats.record_cache_miss();
-    let response = server.upstream.forward(buf).await?;
-    server.cache.insert(&req, response.clone());
 
-    // Log allowed query
-    for query in req.queries() {
-        let _domain = query.name().to_utf8();
-        server.stats.record_allowed();
+    match server.upstream.forward(buf).await {
+        Ok(response) => {
+            server.cache.insert(&req, response.clone());
+            for query in req.queries() {
+                let _domain = domain_from_name(query.name());
+                server.stats.record_allowed();
+            }
+            Ok(response)
+        }
+        Err(e) => {
+            tracing::debug!("Upstream error: {}", e);
+            Ok(servfail_response(&req).to_bytes()?)
+        }
     }
-
-    Ok(response)
 }
 
-fn should_block(req: &Message, rules: &RuleEngine) -> bool {
+/// Validate a DNS query message
+fn is_valid_query(req: &Message) -> bool {
+    if req.message_type() != MessageType::Query {
+        return false;
+    }
+    if req.queries().is_empty() {
+        return false;
+    }
+    true
+}
+
+/// Extract domain from a DNS query name, stripping trailing dot (FQDN)
+fn domain_from_name(name: &trust_dns_proto::rr::Name) -> String {
+    let s = name.to_utf8();
+    s.strip_suffix('.').unwrap_or(&s).to_string()
+}
+
+/// Check if a DNS message should be blocked
+pub fn should_block(req: &Message, rules: &RuleEngine) -> bool {
     req.queries().iter().any(|query| {
-        let domain = query.name().to_utf8();
+        let domain = domain_from_name(query.name());
         tracing::debug!("Query: {}", domain);
 
         if rules.is_blocked(&domain) {
@@ -216,7 +261,8 @@ fn should_block(req: &Message, rules: &RuleEngine) -> bool {
     })
 }
 
-fn blocked_response(req: &Message) -> Message {
+/// Create a blocked (NXDOMAIN) response
+pub fn blocked_response(req: &Message) -> Message {
     let mut resp = Message::new();
     resp.set_id(req.id());
     resp.set_message_type(MessageType::Response);
@@ -230,4 +276,327 @@ fn blocked_response(req: &Message) -> Message {
     }
 
     resp
+}
+
+/// Create a SERVFAIL response for upstream failures
+pub fn servfail_response(req: &Message) -> Message {
+    let mut resp = Message::new();
+    resp.set_id(req.id());
+    resp.set_message_type(MessageType::Response);
+    resp.set_op_code(req.op_code());
+    resp.set_recursion_desired(req.recursion_desired());
+    resp.set_recursion_available(true);
+    resp.set_response_code(ResponseCode::ServFail);
+
+    for query in req.queries() {
+        resp.add_query(query.clone());
+    }
+
+    resp
+}
+
+/// Create a FORMERR response for malformed queries
+pub fn formerr_response() -> Message {
+    let mut resp = Message::new();
+    resp.set_id(0);
+    resp.set_message_type(MessageType::Response);
+    resp.set_recursion_available(true);
+    resp.set_response_code(ResponseCode::FormErr);
+    resp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dns_filter_core::ExactMatcher;
+    use dns_filter_filter::ExceptionMatcher;
+    use trust_dns_proto::op::Query;
+    use trust_dns_proto::rr::record_type::RecordType;
+    use trust_dns_proto::rr::Name;
+
+    fn create_query(domain: &str) -> Message {
+        let mut msg = Message::new();
+        msg.set_id(42);
+        msg.set_message_type(MessageType::Query);
+        msg.set_op_code(trust_dns_proto::op::OpCode::Query);
+        msg.set_recursion_desired(true);
+
+        let mut query = Query::new();
+        query.set_name(Name::from_ascii(domain).unwrap());
+        query.set_query_type(RecordType::A);
+        msg.add_query(query);
+
+        msg
+    }
+
+    fn create_default_server() -> DnsServer {
+        let rules = Arc::new(RuleEngine::new(
+            Arc::new(ExceptionMatcher::new()),
+            vec![(
+                "exact".to_string(),
+                Arc::new(ExactMatcher::new(vec![
+                    "ads.example.com".to_string(),
+                    "tracker.example.com".to_string(),
+                ])) as Arc<dyn dns_filter_core::Matcher>,
+            )],
+        ));
+        let cache = Arc::new(ResponseCache::new(Duration::from_secs(300)));
+        let upstream = Arc::new(Upstream::new("1.1.1.1:53".parse::<SocketAddr>().unwrap()));
+        let stats = Arc::new(dns_filter_core::QueryLogger::new());
+
+        DnsServer {
+            rules,
+            cache,
+            upstream,
+            stats,
+        }
+    }
+
+    // blocked_response tests
+
+    #[test]
+    fn test_blocked_response_creates_nxdomain() {
+        let req = create_query("ads.example.com");
+        let resp = blocked_response(&req);
+        assert_eq!(resp.response_code(), ResponseCode::NXDomain);
+    }
+
+    #[test]
+    fn test_blocked_response_preserves_id() {
+        let req = create_query("ads.example.com");
+        assert_eq!(req.id(), 42);
+        let resp = blocked_response(&req);
+        assert_eq!(resp.id(), 42);
+    }
+
+    #[test]
+    fn test_blocked_response_is_response() {
+        let req = create_query("ads.example.com");
+        let resp = blocked_response(&req);
+        assert_eq!(resp.message_type(), MessageType::Response);
+    }
+
+    #[test]
+    fn test_blocked_response_preserves_query() {
+        let req = create_query("example.com");
+        let resp = blocked_response(&req);
+        assert_eq!(resp.queries().len(), 1);
+        let domain = resp.queries().first().unwrap().name().to_utf8();
+        assert!(domain == "example.com" || domain == "example.com.");
+    }
+
+    #[test]
+    fn test_blocked_response_sets_ra() {
+        let req = create_query("ads.example.com");
+        let resp = blocked_response(&req);
+        assert!(resp.recursion_available());
+    }
+
+    #[test]
+    fn test_blocked_response_preserves_opcode() {
+        let req = create_query("ads.example.com");
+        let resp = blocked_response(&req);
+        assert_eq!(resp.op_code(), trust_dns_proto::op::OpCode::Query);
+    }
+
+    #[test]
+    fn test_blocked_response_serializes() {
+        let req = create_query("ads.example.com");
+        let resp = blocked_response(&req);
+        let bytes = resp.to_bytes().unwrap();
+        assert!(!bytes.is_empty());
+        // Re-parse and verify
+        let parsed = Message::from_bytes(&bytes).unwrap();
+        assert_eq!(parsed.response_code(), ResponseCode::NXDomain);
+    }
+
+    // should_block tests
+
+    #[test]
+    fn test_should_block_returns_true_for_blocked_domain() {
+        let rules = Arc::new(RuleEngine::new(
+            Arc::new(ExceptionMatcher::new()),
+            vec![(
+                "exact".to_string(),
+                Arc::new(ExactMatcher::new(vec!["ads.example.com".to_string()]))
+                    as Arc<dyn dns_filter_core::Matcher>,
+            )],
+        ));
+        let req = create_query("ads.example.com");
+        assert!(should_block(&req, &rules));
+    }
+
+    #[test]
+    fn test_should_block_returns_false_for_allowed_domain() {
+        let rules = Arc::new(RuleEngine::new(
+            Arc::new(ExceptionMatcher::new()),
+            vec![(
+                "exact".to_string(),
+                Arc::new(ExactMatcher::new(vec!["ads.example.com".to_string()]))
+                    as Arc<dyn dns_filter_core::Matcher>,
+            )],
+        ));
+        let req = create_query("safe.example.com");
+        assert!(!should_block(&req, &rules));
+    }
+
+    #[test]
+    fn test_should_block_matches_any_query() {
+        let rules = Arc::new(RuleEngine::new(
+            Arc::new(ExceptionMatcher::new()),
+            vec![(
+                "exact".to_string(),
+                Arc::new(ExactMatcher::new(vec!["blocked.com".to_string()]))
+                    as Arc<dyn dns_filter_core::Matcher>,
+            )],
+        ));
+
+        let mut msg = Message::new();
+        msg.set_id(1);
+        msg.set_message_type(MessageType::Query);
+
+        let mut q1 = Query::new();
+        q1.set_name(Name::from_ascii("allowed.com").unwrap());
+        q1.set_query_type(RecordType::A);
+        msg.add_query(q1);
+
+        let mut q2 = Query::new();
+        q2.set_name(Name::from_ascii("blocked.com").unwrap());
+        q2.set_query_type(RecordType::AAAA);
+        msg.add_query(q2);
+
+        assert!(should_block(&msg, &rules));
+    }
+
+    // is_valid_query tests
+
+    #[test]
+    fn test_is_valid_query_accepts_query() {
+        let req = create_query("example.com");
+        assert!(is_valid_query(&req));
+    }
+
+    #[test]
+    fn test_is_valid_query_rejects_response() {
+        let req = create_query("example.com");
+        let resp = blocked_response(&req);
+        assert!(!is_valid_query(&resp));
+    }
+
+    #[test]
+    fn test_is_valid_query_rejects_empty_queries() {
+        let mut msg = Message::new();
+        msg.set_message_type(MessageType::Query);
+        assert!(!is_valid_query(&msg));
+    }
+
+    // formerr_response tests
+
+    #[test]
+    fn test_formerr_response() {
+        let resp = formerr_response();
+        assert_eq!(resp.message_type(), MessageType::Response);
+        assert_eq!(resp.response_code(), ResponseCode::FormErr);
+        assert!(resp.recursion_available());
+    }
+
+    // servfail_response tests
+
+    #[test]
+    fn test_servfail_response() {
+        let req = create_query("example.com");
+        let resp = servfail_response(&req);
+        assert_eq!(resp.message_type(), MessageType::Response);
+        assert_eq!(resp.response_code(), ResponseCode::ServFail);
+        assert_eq!(resp.id(), 42);
+        assert_eq!(resp.queries().len(), 1);
+    }
+
+    // handle_dns_query tests (synchronous part, no I/O)
+
+    #[tokio::test]
+    async fn test_handle_dns_query_blocks_filtered_domain() {
+        let server = create_default_server();
+        let req = create_query("ads.example.com");
+        let bytes = req.to_bytes().unwrap();
+        let response = handle_dns_query(&bytes, &server).await.unwrap();
+        let parsed = Message::from_bytes(&response).unwrap();
+        assert_eq!(parsed.response_code(), ResponseCode::NXDomain);
+    }
+
+    #[tokio::test]
+    async fn test_handle_dns_query_allows_unfiltered() {
+        let server = create_default_server();
+        let req = create_query("example.com");
+        let bytes = req.to_bytes().unwrap();
+        let response = handle_dns_query(&bytes, &server).await.unwrap();
+        let parsed = Message::from_bytes(&response).unwrap();
+        // Must be a valid response (not FORMERR), regardless of upstream availability
+        assert_eq!(parsed.message_type(), MessageType::Response);
+        assert_ne!(parsed.response_code(), ResponseCode::FormErr);
+        assert_eq!(parsed.id(), 42);
+    }
+
+    #[tokio::test]
+    async fn test_handle_dns_query_formerr_on_garbage() {
+        let server = create_default_server();
+        let garbage = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let response = handle_dns_query(&garbage, &server).await.unwrap();
+        let parsed = Message::from_bytes(&response).unwrap();
+        assert_eq!(parsed.response_code(), ResponseCode::FormErr);
+    }
+
+    #[tokio::test]
+    async fn test_handle_dns_query_formerr_on_empty() {
+        let server = create_default_server();
+        let response = handle_dns_query(&[], &server).await.unwrap();
+        let parsed = Message::from_bytes(&response).unwrap();
+        assert_eq!(parsed.response_code(), ResponseCode::FormErr);
+    }
+
+    #[tokio::test]
+    async fn test_handle_dns_query_formerr_on_response() {
+        let server = create_default_server();
+        let req = create_query("example.com");
+        let resp = blocked_response(&req);
+        let bytes = resp.to_bytes().unwrap();
+        // Sending a response as a query should get FORMERR
+        let response = handle_dns_query(&bytes, &server).await.unwrap();
+        let parsed = Message::from_bytes(&response).unwrap();
+        assert_eq!(parsed.response_code(), ResponseCode::FormErr);
+    }
+
+    #[tokio::test]
+    async fn test_handle_dns_query_formerr_on_no_question() {
+        let server = create_default_server();
+        let mut msg = Message::new();
+        msg.set_id(1);
+        msg.set_message_type(MessageType::Query);
+        let bytes = msg.to_bytes().unwrap();
+        let response = handle_dns_query(&bytes, &server).await.unwrap();
+        let parsed = Message::from_bytes(&response).unwrap();
+        assert_eq!(parsed.response_code(), ResponseCode::FormErr);
+    }
+
+    // Edge cases
+
+    #[test]
+    fn test_blocked_response_no_queries() {
+        let mut msg = Message::new();
+        msg.set_id(1);
+        msg.set_message_type(MessageType::Query);
+        let resp = blocked_response(&msg);
+        assert_eq!(resp.response_code(), ResponseCode::NXDomain);
+        assert_eq!(resp.queries().len(), 0);
+    }
+
+    #[test]
+    fn test_should_block_empty_rules() {
+        let rules = Arc::new(RuleEngine::new(
+            Arc::new(ExceptionMatcher::new()),
+            Vec::new(),
+        ));
+        let req = create_query("example.com");
+        assert!(!should_block(&req, &rules));
+    }
 }
