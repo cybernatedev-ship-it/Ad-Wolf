@@ -84,7 +84,7 @@ impl QueryLogger {
             .iter()
             .map(|entry| (entry.key().clone(), *entry.value()))
             .collect();
-        blocked_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        blocked_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
         blocked_vec.truncate(100); // Top 100 blocked domains
 
         QueryStats {
@@ -178,8 +178,14 @@ mod tests {
 
         let stats = logger.get_stats();
         assert_eq!(stats.blocked_by_domain.len(), 2);
-        assert_eq!(stats.blocked_by_domain[0], ("ads.example.com".to_string(), 2));
-        assert_eq!(stats.blocked_by_domain[1], ("tracker.example.com".to_string(), 1));
+        assert_eq!(
+            stats.blocked_by_domain[0],
+            ("ads.example.com".to_string(), 2)
+        );
+        assert_eq!(
+            stats.blocked_by_domain[1],
+            ("tracker.example.com".to_string(), 1)
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 pub mod stats;
 
-pub use stats::{QueryLogger, QueryLogEntry, QueryStats};
+pub use stats::{QueryLogEntry, QueryLogger, QueryStats};
 
 /// A trait for implementing different rule matching strategies
 pub trait Matcher: Send + Sync {

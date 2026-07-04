@@ -65,10 +65,7 @@ pub async fn run_server(addr: &str, rules: Arc<RuleEngine>) -> anyhow::Result<()
 }
 
 /// Run UDP DNS server
-async fn run_udp_server(
-    addr: &str,
-    server: DnsServer,
-) -> anyhow::Result<()> {
+async fn run_udp_server(addr: &str, server: DnsServer) -> anyhow::Result<()> {
     let socket = Arc::new(UdpSocket::bind(addr).await?);
     tracing::info!("UDP server bound to {}", addr);
 
@@ -93,10 +90,7 @@ async fn run_udp_server(
 }
 
 /// Run TCP DNS server
-async fn run_tcp_server(
-    addr: &str,
-    server: DnsServer,
-) -> anyhow::Result<()> {
+async fn run_tcp_server(addr: &str, server: DnsServer) -> anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("TCP server bound to {}", addr);
 
@@ -175,10 +169,7 @@ async fn handle_tcp_client(
 }
 
 /// Handle a single DNS query (shared logic for UDP and TCP)
-async fn handle_dns_query(
-    buf: &[u8],
-    server: &DnsServer,
-) -> anyhow::Result<Vec<u8>> {
+async fn handle_dns_query(buf: &[u8], server: &DnsServer) -> anyhow::Result<Vec<u8>> {
     let req = Message::from_bytes(buf)?;
 
     if should_block(&req, &server.rules) {

@@ -1,0 +1,68 @@
+<svg width="512" height="512" viewBox="240 20 200 200" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>App icon: ultra high-poly wolf head biting an ad banner</title>
+<rect x="240" y="20" width="200" height="200" rx="32" fill="#1a2230"/>
+
+<polygon points="340,50 328,64 340,72" fill="#a5b9cf"/>
+<polygon points="340,50 352,64 340,72" fill="#93a9c3"/>
+<polygon points="328,64 318,80 336,84 340,72" fill="#8fa6bf"/>
+<polygon points="352,64 362,80 344,84 340,72" fill="#7c93af"/>
+<polygon points="318,80 308,96 328,94 336,84" fill="#7c93af"/>
+<polygon points="362,80 372,96 352,94 344,84" fill="#6d84a0"/>
+<polygon points="308,96 300,110 322,110 328,94" fill="#6d84a0"/>
+<polygon points="372,96 380,110 358,110 352,94" fill="#5b6f8a"/>
+
+<polygon points="328,94 336,84 344,84 352,94 340,102" fill="#93a9c3"/>
+<polygon points="322,110 328,94 340,102 330,114" fill="#7c93af"/>
+<polygon points="358,110 352,94 340,102 350,114" fill="#6d84a0"/>
+
+<polygon points="300,110 290,86 308,96" fill="#5b6f8a"/>
+<polygon points="290,86 276,62 300,110" fill="#4a5c76"/>
+<polygon points="380,110 390,86 372,96" fill="#4a5c76"/>
+<polygon points="390,86 404,62 380,110" fill="#3d4d64"/>
+
+<polygon points="300,110 322,110 320,124 306,126" fill="#6d84a0"/>
+<polygon points="380,110 358,110 360,124 374,126" fill="#5b6f8a"/>
+<polygon points="322,110 330,114 328,126 320,124" fill="#7c93af"/>
+<polygon points="358,110 350,114 352,126 360,124" fill="#6d84a0"/>
+<polygon points="330,114 340,102 350,114 344,128 336,128" fill="#a5b9cf"/>
+
+<polygon points="306,126 320,124 316,140 300,138" fill="#4a5c76"/>
+<polygon points="374,126 360,124 364,140 380,138" fill="#3d4d64"/>
+<polygon points="320,124 328,126 322,140 316,140" fill="#6d84a0"/>
+<polygon points="360,124 352,126 358,140 364,140" fill="#5b6f8a"/>
+<polygon points="328,126 336,128 330,142 322,140" fill="#7c93af"/>
+<polygon points="352,126 344,128 350,142 358,140" fill="#6d84a0"/>
+<polygon points="336,128 344,128 346,144 334,144" fill="#8fa6bf"/>
+
+<polygon points="300,138 316,140 312,158 294,156" fill="#3d4d64"/>
+<polygon points="380,138 364,140 368,158 386,156" fill="#2b3648"/>
+<polygon points="316,140 322,140 318,158 312,158" fill="#5b6f8a"/>
+<polygon points="364,140 358,140 362,158 368,158" fill="#4a5c76"/>
+<polygon points="322,140 330,142 326,160 318,158" fill="#6d84a0"/>
+<polygon points="358,140 350,142 354,160 362,158" fill="#5b6f8a"/>
+<polygon points="330,142 334,144 332,162 326,160" fill="#7c93af"/>
+<polygon points="350,142 346,144 348,162 354,160" fill="#6d84a0"/>
+
+<circle cx="315" cy="130" r="4" fill="#e8c46b"/>
+<circle cx="365" cy="130" r="4" fill="#e8c46b"/>
+
+<polygon points="294,156 312,158 308,174 290,172" fill="#2b3648"/>
+<polygon points="386,156 368,158 372,174 390,172" fill="#22303f"/>
+<polygon points="312,158 318,158 314,176 308,174" fill="#4a5c76"/>
+<polygon points="368,158 362,158 366,176 372,174" fill="#3d4d64"/>
+<polygon points="318,158 326,160 322,178 314,176" fill="#5b6f8a"/>
+<polygon points="362,158 354,160 358,178 366,176" fill="#4a5c76"/>
+<polygon points="326,160 332,162 330,180 322,178" fill="#6d84a0"/>
+<polygon points="354,160 348,162 350,180 358,178" fill="#5b6f8a"/>
+<polygon points="332,162 348,162 344,182 336,182" fill="#3d4d64"/>
+
+<rect x="306" y="182" width="66" height="30" rx="3" fill="#e8ecf1" transform="rotate(-4 339 197)"/>
+<rect x="311" y="188" width="26" height="6" rx="1.5" fill="#c94f4f" transform="rotate(-4 339 197)"/>
+<rect x="311" y="198" width="40" height="4" rx="1" fill="#9aa6b5" transform="rotate(-4 339 197)"/>
+<rect x="311" y="205" width="30" height="4" rx="1" fill="#9aa6b5" transform="rotate(-4 339 197)"/>
+<line x1="316" y1="184" x2="330" y2="210" stroke="#1a2230" stroke-width="1.5" transform="rotate(-4 339 197)"/>
+
+<polygon points="322,178 336,182 344,182 358,178 340,196" fill="#7c93af"/>
+<polygon points="322,178 340,196 336,182" fill="#8fa6bf"/>
+<polygon points="358,178 340,196 344,182" fill="#93a9c3"/>
+</svg>

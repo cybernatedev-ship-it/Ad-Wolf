@@ -5,12 +5,13 @@ A fully local DNS filtering daemon written in Rust, inspired by Pi-hole and uBlo
 ## Features
 
 - **100% local** — No external APIs or cloud dependency
-- **DNS server** — Listens on `127.0.0.1:5353` (UDP)
-- **Upstream forwarding** — Sends allowed queries to Cloudflare DNS (`1.1.1.1:53`)
+- **DNS server** — UDP and TCP, IPv4 + IPv6
+- **Upstream forwarding** — Configurable resolvers with failover
 - **Response cache** — Reuses recent upstream DNS responses
-- **Filter engine** — Blocks domains from local filter lists
-- **Multiple formats** — Plain domains and uBlock-style rules
-- **Fast matching** — Uses `DashSet` for concurrent lookups
+- **Filter engine** — Modular matchers with priority-based matching
+- **Multiple formats** — Plain domains, hosts files, uBlock/AdGuard rules
+- **Hot reload** — Update rules without restart
+- **Statistics** — Query counts, block rates, top blocked domains
 
 ## Building
 
@@ -21,10 +22,10 @@ cargo build --release
 ## Running
 
 ```bash
-cargo run
+cargo run --bin dns-filter-cli
 ```
 
-The server will listen on `127.0.0.1:5353` and load rules from `lists/*.txt`.
+The server listens on the address configured in `config.toml` and loads rules from the `lists/` directory.
 
 ## Rule Formats
 
@@ -36,10 +37,15 @@ ads.example.com
 tracker.google.com
 ```
 
+### Hosts file format
+```
+0.0.0.0 ads.example.com
+```
+
 ### uBlock-style rules
 ```
 ||doubleclick.net^
-||facebook.com^
+@@||allowed.example.com^
 ```
 
 ### Comments and empty lines
@@ -47,30 +53,25 @@ tracker.google.com
 ! This is a comment
 ```
 
-## Testing
-
-Query the local DNS server:
-```bash
-nslookup ads.example.com 127.0.0.1 -port=5353
-```
-
-Should return `NXDOMAIN` for blocked domains, and normal responses for allowed domains.
-
 ## Project Structure
 
 ```
-src/
-  main.rs          — Entry point
-  dns/
-    server.rs      — UDP DNS server and request handling
-    upstream.rs    — Upstream DNS forwarding
-    cache.rs       — DNS response cache
-  filter/
-    engine.rs      — Rule matching engine
-    parser.rs      — Rule file parser
-    loader.rs      — Rule file loader
+crates/
+  core/        — Business logic, matcher traits, statistics
+  filter/      — Rule engine, parser, loader
+  dns/         — DNS server (UDP + TCP), query handling
+  cache/       — DNS response caching
+  upstream/    — Upstream resolver forwarding
+  config/      — TOML configuration management
+  cli/         — CLI entry point
 lists/
-  custom.txt       — Example filter list
+  custom.txt   — Example filter list
+```
+
+## Testing
+
+```bash
+cargo test
 ```
 
 ## License
