@@ -125,6 +125,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dns-filter-cache",
+ "dns-filter-core",
  "dns-filter-filter",
  "dns-filter-upstream",
  "tokio",
