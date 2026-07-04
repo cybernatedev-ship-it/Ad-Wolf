@@ -1,0 +1,16 @@
+[package]
+name = "dns-filter-dns"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "DNS server and protocol handling"
+
+[dependencies]
+tokio.workspace = true
+trust-dns-proto.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+dns-filter-filter = { path = "../filter" }
+dns-filter-cache = { path = "../cache" }
+dns-filter-upstream = { path = "../upstream" }

@@ -1,26 +1,32 @@
-[package]
-name = "rust-dns-ad-filter"
+[workspace]
+members = [
+    "crates/core",
+    "crates/filter",
+    "crates/dns",
+    "crates/cache",
+    "crates/upstream",
+    "crates/config",
+    "crates/cli",
+]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
+authors = ["DNS Filter Contributors"]
+license = "MIT"
 
-[dependencies]
+[workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 trust-dns-proto = "0.23"
 dashmap = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
-[package.metadata.bundle]
-name = "My App"
-identifier = "com.goldfang.myapp"
-icon = [
-    "icons/32x32.png",
-    "icons/128x128.png",
-    "icons/256x256.png",
-    "icons/512x512.png",
-]
-copyright = "Copyright (c) 2026"
-category = "Utility"
-short_description = "A ad blocking util"
-long_description = """A Util that blocks ads."""
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

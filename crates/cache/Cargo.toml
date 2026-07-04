@@ -1,0 +1,13 @@
+[package]
+name = "dns-filter-cache"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "DNS response caching layer"
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+dashmap.workspace = true
+trust-dns-proto.workspace = true

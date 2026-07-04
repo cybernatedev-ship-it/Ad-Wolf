@@ -1,0 +1,13 @@
+[package]
+name = "dns-filter-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core business logic for DNS filtering"
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+dashmap.workspace = true
+serde.workspace = true
