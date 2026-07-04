@@ -11,6 +11,10 @@ tokio.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+clap.workspace = true
+dns-filter-core = { path = "../core" }
 dns-filter-dns = { path = "../dns" }
 dns-filter-config = { path = "../config" }
 dns-filter-filter = { path = "../filter" }
+dns-filter-upstream = { path = "../upstream" }
+dns-filter-cache = { path = "../cache" }

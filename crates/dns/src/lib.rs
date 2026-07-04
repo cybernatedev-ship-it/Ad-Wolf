@@ -2,7 +2,6 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, UdpSocket};
@@ -13,13 +12,13 @@ use dns_filter_cache::ResponseCache;
 use dns_filter_filter::RuleEngine;
 use dns_filter_upstream::Upstream;
 
-const DEFAULT_UPSTREAM: &str = "1.1.1.1:53";
-const CACHE_TTL: Duration = Duration::from_secs(300);
 const MAX_UDP_PACKET: usize = 4096;
 const MAX_TCP_MESSAGE: u16 = 65535;
 
 /// DNS server configuration
 pub struct DnsServer {
+    /// Listening address (e.g., "127.0.0.1:53")
+    pub listen: String,
     /// Rule engine for filtering
     pub rules: Arc<RuleEngine>,
     /// DNS response cache
@@ -31,49 +30,40 @@ pub struct DnsServer {
 }
 
 /// Run the DNS server on both UDP and TCP
-pub async fn run_server(addr: &str, rules: Arc<RuleEngine>) -> anyhow::Result<()> {
-    let upstream = Arc::new(Upstream::new(DEFAULT_UPSTREAM.parse::<SocketAddr>()?));
-    let cache = Arc::new(ResponseCache::new(CACHE_TTL));
-    let stats = Arc::new(dns_filter_core::QueryLogger::new());
-
-    let server = DnsServer {
-        rules,
-        cache,
-        upstream,
-        stats,
-    };
+pub async fn run_server(server: DnsServer) -> anyhow::Result<()> {
+    let addr = &server.listen;
 
     tracing::info!("DNS server listening on {} (UDP + TCP)", addr);
-    tracing::info!("Forwarding allowed queries to {}", DEFAULT_UPSTREAM);
 
-    let udp_addr = addr.to_string();
     let server_udp = DnsServer {
+        listen: addr.clone(),
         rules: Arc::clone(&server.rules),
         cache: Arc::clone(&server.cache),
         upstream: Arc::clone(&server.upstream),
         stats: Arc::clone(&server.stats),
     };
     tokio::spawn(async move {
-        if let Err(e) = run_udp_server(&udp_addr, server_udp).await {
+        if let Err(e) = run_udp_server(&server_udp).await {
             tracing::error!("UDP server error: {}", e);
         }
     });
 
-    run_tcp_server(addr, server).await?;
+    run_tcp_server(server).await?;
 
     Ok(())
 }
 
 /// Run UDP DNS server
-async fn run_udp_server(addr: &str, server: DnsServer) -> anyhow::Result<()> {
-    let socket = Arc::new(UdpSocket::bind(addr).await?);
-    tracing::info!("UDP server bound to {}", addr);
+async fn run_udp_server(server: &DnsServer) -> anyhow::Result<()> {
+    let socket = Arc::new(UdpSocket::bind(&server.listen).await?);
+    tracing::info!("UDP server bound to {}", server.listen);
 
     loop {
         let mut buf = vec![0; MAX_UDP_PACKET];
         let (n, peer_addr) = socket.recv_from(&mut buf).await?;
 
         let server = DnsServer {
+            listen: server.listen.clone(),
             rules: Arc::clone(&server.rules),
             cache: Arc::clone(&server.cache),
             upstream: Arc::clone(&server.upstream),
@@ -90,14 +80,15 @@ async fn run_udp_server(addr: &str, server: DnsServer) -> anyhow::Result<()> {
 }
 
 /// Run TCP DNS server
-async fn run_tcp_server(addr: &str, server: DnsServer) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(addr).await?;
-    tracing::info!("TCP server bound to {}", addr);
+async fn run_tcp_server(server: DnsServer) -> anyhow::Result<()> {
+    let listener = TcpListener::bind(&server.listen).await?;
+    tracing::info!("TCP server bound to {}", server.listen);
 
     loop {
         let (mut socket, _peer_addr) = listener.accept().await?;
 
         let server = DnsServer {
+            listen: server.listen.clone(),
             rules: Arc::clone(&server.rules),
             cache: Arc::clone(&server.cache),
             upstream: Arc::clone(&server.upstream),
@@ -228,6 +219,12 @@ async fn handle_dns_query(buf: &[u8], server: &DnsServer) -> anyhow::Result<Vec<
     }
 }
 
+/// Extract domain from a DNS query name, stripping trailing dot (FQDN)
+fn domain_from_name(name: &trust_dns_proto::rr::Name) -> String {
+    let s = name.to_utf8();
+    s.strip_suffix('.').unwrap_or(&s).to_string()
+}
+
 /// Validate a DNS query message
 fn is_valid_query(req: &Message) -> bool {
     if req.message_type() != MessageType::Query {
@@ -237,12 +234,6 @@ fn is_valid_query(req: &Message) -> bool {
         return false;
     }
     true
-}
-
-/// Extract domain from a DNS query name, stripping trailing dot (FQDN)
-fn domain_from_name(name: &trust_dns_proto::rr::Name) -> String {
-    let s = name.to_utf8();
-    s.strip_suffix('.').unwrap_or(&s).to_string()
 }
 
 /// Check if a DNS message should be blocked
@@ -310,6 +301,7 @@ mod tests {
     use super::*;
     use dns_filter_core::ExactMatcher;
     use dns_filter_filter::ExceptionMatcher;
+    use std::time::Duration;
     use trust_dns_proto::op::Query;
     use trust_dns_proto::rr::record_type::RecordType;
     use trust_dns_proto::rr::Name;
@@ -329,7 +321,7 @@ mod tests {
         msg
     }
 
-    fn create_default_server() -> DnsServer {
+    fn test_server() -> DnsServer {
         let rules = Arc::new(RuleEngine::new(
             Arc::new(ExceptionMatcher::new()),
             vec![(
@@ -345,6 +337,7 @@ mod tests {
         let stats = Arc::new(dns_filter_core::QueryLogger::new());
 
         DnsServer {
+            listen: "127.0.0.1:0".to_string(),
             rules,
             cache,
             upstream,
@@ -405,7 +398,6 @@ mod tests {
         let resp = blocked_response(&req);
         let bytes = resp.to_bytes().unwrap();
         assert!(!bytes.is_empty());
-        // Re-parse and verify
         let parsed = Message::from_bytes(&bytes).unwrap();
         assert_eq!(parsed.response_code(), ResponseCode::NXDomain);
     }
@@ -512,11 +504,11 @@ mod tests {
         assert_eq!(resp.queries().len(), 1);
     }
 
-    // handle_dns_query tests (synchronous part, no I/O)
+    // handle_dns_query tests (synchronous part, no real I/O)
 
     #[tokio::test]
     async fn test_handle_dns_query_blocks_filtered_domain() {
-        let server = create_default_server();
+        let server = test_server();
         let req = create_query("ads.example.com");
         let bytes = req.to_bytes().unwrap();
         let response = handle_dns_query(&bytes, &server).await.unwrap();
@@ -526,12 +518,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_dns_query_allows_unfiltered() {
-        let server = create_default_server();
+        let server = test_server();
         let req = create_query("example.com");
         let bytes = req.to_bytes().unwrap();
         let response = handle_dns_query(&bytes, &server).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
-        // Must be a valid response (not FORMERR), regardless of upstream availability
         assert_eq!(parsed.message_type(), MessageType::Response);
         assert_ne!(parsed.response_code(), ResponseCode::FormErr);
         assert_eq!(parsed.id(), 42);
@@ -539,7 +530,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_dns_query_formerr_on_garbage() {
-        let server = create_default_server();
+        let server = test_server();
         let garbage = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let response = handle_dns_query(&garbage, &server).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
@@ -548,7 +539,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_dns_query_formerr_on_empty() {
-        let server = create_default_server();
+        let server = test_server();
         let response = handle_dns_query(&[], &server).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
         assert_eq!(parsed.response_code(), ResponseCode::FormErr);
@@ -556,11 +547,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_dns_query_formerr_on_response() {
-        let server = create_default_server();
+        let server = test_server();
         let req = create_query("example.com");
         let resp = blocked_response(&req);
         let bytes = resp.to_bytes().unwrap();
-        // Sending a response as a query should get FORMERR
         let response = handle_dns_query(&bytes, &server).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
         assert_eq!(parsed.response_code(), ResponseCode::FormErr);
@@ -568,7 +558,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_dns_query_formerr_on_no_question() {
-        let server = create_default_server();
+        let server = test_server();
         let mut msg = Message::new();
         msg.set_id(1);
         msg.set_message_type(MessageType::Query);
