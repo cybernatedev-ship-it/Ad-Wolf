@@ -2,7 +2,6 @@ mod dns;
 mod filter;
 
 use std::sync::Arc;
-use tracing_subscriber;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
