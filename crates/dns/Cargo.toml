@@ -11,6 +11,7 @@ tokio.workspace = true
 trust-dns-proto.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+dns-filter-core = { path = "../core" }
 dns-filter-filter = { path = "../filter" }
 dns-filter-cache = { path = "../cache" }
 dns-filter-upstream = { path = "../upstream" }

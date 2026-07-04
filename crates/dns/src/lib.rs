@@ -16,27 +16,50 @@ use dns_filter_upstream::Upstream;
 const DEFAULT_UPSTREAM: &str = "1.1.1.1:53";
 const CACHE_TTL: Duration = Duration::from_secs(300);
 
+/// DNS server configuration
+pub struct DnsServer {
+    /// Rule engine for filtering
+    pub rules: Arc<RuleEngine>,
+    /// DNS response cache
+    pub cache: Arc<ResponseCache>,
+    /// Upstream resolver
+    pub upstream: Arc<Upstream>,
+    /// Query statistics logger
+    pub stats: Arc<dns_filter_core::QueryLogger>,
+}
+
 /// Run the DNS server on both UDP and TCP
 pub async fn run_server(addr: &str, rules: Arc<RuleEngine>) -> anyhow::Result<()> {
     let upstream = Arc::new(Upstream::new(DEFAULT_UPSTREAM.parse::<SocketAddr>()?));
     let cache = Arc::new(ResponseCache::new(CACHE_TTL));
+    let stats = Arc::new(dns_filter_core::QueryLogger::new());
+
+    let server = DnsServer {
+        rules,
+        cache,
+        upstream,
+        stats,
+    };
 
     tracing::info!("DNS server listening on {} (UDP + TCP)", addr);
     tracing::info!("Forwarding allowed queries to {}", DEFAULT_UPSTREAM);
 
     // Spawn UDP server
     let udp_addr = addr.to_string();
-    let udp_rules = Arc::clone(&rules);
-    let udp_upstream = Arc::clone(&upstream);
-    let udp_cache = Arc::clone(&cache);
+    let server_udp = DnsServer {
+        rules: Arc::clone(&server.rules),
+        cache: Arc::clone(&server.cache),
+        upstream: Arc::clone(&server.upstream),
+        stats: Arc::clone(&server.stats),
+    };
     tokio::spawn(async move {
-        if let Err(e) = run_udp_server(&udp_addr, udp_rules, udp_upstream, udp_cache).await {
+        if let Err(e) = run_udp_server(&udp_addr, server_udp).await {
             tracing::error!("UDP server error: {}", e);
         }
     });
 
     // Run TCP server in main thread
-    run_tcp_server(addr, rules, upstream, cache).await?;
+    run_tcp_server(addr, server).await?;
 
     Ok(())
 }
@@ -44,9 +67,7 @@ pub async fn run_server(addr: &str, rules: Arc<RuleEngine>) -> anyhow::Result<()
 /// Run UDP DNS server
 async fn run_udp_server(
     addr: &str,
-    rules: Arc<RuleEngine>,
-    upstream: Arc<Upstream>,
-    cache: Arc<ResponseCache>,
+    server: DnsServer,
 ) -> anyhow::Result<()> {
     let socket = Arc::new(UdpSocket::bind(addr).await?);
     tracing::info!("UDP server bound to {}", addr);
@@ -55,23 +76,16 @@ async fn run_udp_server(
         let mut buf = vec![0; 512];
         let (n, peer_addr) = socket.recv_from(&mut buf).await?;
 
-        let rules = Arc::clone(&rules);
+        let server = DnsServer {
+            rules: Arc::clone(&server.rules),
+            cache: Arc::clone(&server.cache),
+            upstream: Arc::clone(&server.upstream),
+            stats: Arc::clone(&server.stats),
+        };
         let socket = Arc::clone(&socket);
-        let upstream = Arc::clone(&upstream);
-        let cache = Arc::clone(&cache);
 
         tokio::spawn(async move {
-            if let Err(e) = handle_query(
-                &buf[..n],
-                &rules,
-                &socket,
-                peer_addr,
-                &upstream,
-                &cache,
-                false,
-            )
-            .await
-            {
+            if let Err(e) = handle_udp_query(&buf[..n], &server, &socket, peer_addr).await {
                 tracing::debug!("UDP query error: {}", e);
             }
         });
@@ -81,37 +95,45 @@ async fn run_udp_server(
 /// Run TCP DNS server
 async fn run_tcp_server(
     addr: &str,
-    rules: Arc<RuleEngine>,
-    upstream: Arc<Upstream>,
-    cache: Arc<ResponseCache>,
+    server: DnsServer,
 ) -> anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("TCP server bound to {}", addr);
 
     loop {
-        let (mut socket, peer_addr) = listener.accept().await?;
+        let (mut socket, _peer_addr) = listener.accept().await?;
 
-        let rules = Arc::clone(&rules);
-        let upstream = Arc::clone(&upstream);
-        let cache = Arc::clone(&cache);
+        let server = DnsServer {
+            rules: Arc::clone(&server.rules),
+            cache: Arc::clone(&server.cache),
+            upstream: Arc::clone(&server.upstream),
+            stats: Arc::clone(&server.stats),
+        };
 
         tokio::spawn(async move {
-            if let Err(e) =
-                handle_tcp_client(&mut socket, peer_addr, &rules, &upstream, &cache).await
-            {
+            if let Err(e) = handle_tcp_client(&mut socket, &server).await {
                 tracing::debug!("TCP client error: {}", e);
             }
         });
     }
 }
 
+/// Handle UDP query
+async fn handle_udp_query(
+    buf: &[u8],
+    server: &DnsServer,
+    socket: &UdpSocket,
+    peer_addr: std::net::SocketAddr,
+) -> anyhow::Result<()> {
+    let response = handle_dns_query(buf, server).await?;
+    socket.send_to(&response, peer_addr).await?;
+    Ok(())
+}
+
 /// Handle a TCP DNS client connection
 async fn handle_tcp_client(
     socket: &mut tokio::net::TcpStream,
-    peer_addr: SocketAddr,
-    rules: &RuleEngine,
-    upstream: &Upstream,
-    cache: &ResponseCache,
+    server: &DnsServer,
 ) -> anyhow::Result<()> {
     loop {
         // Read DNS query length (2 bytes, big-endian)
@@ -134,7 +156,7 @@ async fn handle_tcp_client(
         socket.read_exact(&mut query_buf).await?;
 
         // Handle the query
-        match handle_dns_query(&query_buf, rules, upstream, cache, true).await {
+        match handle_dns_query(&query_buf, server).await {
             Ok(response) => {
                 // Write response length
                 let response_len = (response.len() as u16).to_be_bytes();
@@ -143,7 +165,7 @@ async fn handle_tcp_client(
                 socket.write_all(&response).await?;
             }
             Err(e) => {
-                tracing::debug!("TCP query error from {}: {}", peer_addr, e);
+                tracing::debug!("TCP query error: {}", e);
                 break;
             }
         }
@@ -152,42 +174,39 @@ async fn handle_tcp_client(
     Ok(())
 }
 
-async fn handle_query(
-    buf: &[u8],
-    rules: &RuleEngine,
-    socket: &UdpSocket,
-    peer_addr: std::net::SocketAddr,
-    upstream: &Upstream,
-    cache: &ResponseCache,
-    _is_tcp: bool,
-) -> anyhow::Result<()> {
-    let response = handle_dns_query(buf, rules, upstream, cache, false).await?;
-    socket.send_to(&response, peer_addr).await?;
-    Ok(())
-}
-
 /// Handle a single DNS query (shared logic for UDP and TCP)
 async fn handle_dns_query(
     buf: &[u8],
-    rules: &RuleEngine,
-    upstream: &Upstream,
-    cache: &ResponseCache,
-    _is_tcp: bool,
+    server: &DnsServer,
 ) -> anyhow::Result<Vec<u8>> {
     let req = Message::from_bytes(buf)?;
 
-    if should_block(&req, rules) {
+    if should_block(&req, &server.rules) {
+        // Log blocked query
+        for query in req.queries() {
+            let domain = query.name().to_utf8();
+            server.stats.record_blocked(&domain);
+        }
         let response_bytes = blocked_response(&req).to_bytes()?;
         return Ok(response_bytes);
     }
 
-    if let Some(cached) = cache.get(&req)? {
+    if let Some(cached) = server.cache.get(&req)? {
+        server.stats.record_cache_hit();
         tracing::debug!("Cache hit for query id {}", req.id());
         return Ok(cached);
     }
 
-    let response = upstream.forward(buf).await?;
-    cache.insert(&req, response.clone());
+    server.stats.record_cache_miss();
+    let response = server.upstream.forward(buf).await?;
+    server.cache.insert(&req, response.clone());
+
+    // Log allowed query
+    for query in req.queries() {
+        let _domain = query.name().to_utf8();
+        server.stats.record_allowed();
+    }
+
     Ok(response)
 }
 

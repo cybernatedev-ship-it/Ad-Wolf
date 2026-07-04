@@ -3,6 +3,10 @@
 use dashmap::DashSet;
 use std::sync::Arc;
 
+pub mod stats;
+
+pub use stats::{QueryLogger, QueryLogEntry, QueryStats};
+
 /// A trait for implementing different rule matching strategies
 pub trait Matcher: Send + Sync {
     /// Check if a domain should be blocked
