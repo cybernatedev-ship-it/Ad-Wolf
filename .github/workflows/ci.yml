@@ -146,9 +146,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files=$(find artifacts -type f)
+          files=$(find artifacts -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' \) | sort)
           if [ -z "$files" ]; then
-            echo "No artifacts found, skipping release."
+            echo "No installer artifacts found, skipping release."
             exit 0
           fi
           TAG="v$(date +%Y%m%d.%H%M)"
