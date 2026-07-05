@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, UdpSocket};
 use trust_dns_proto::op::{Message, MessageType, ResponseCode};
@@ -10,7 +11,9 @@ use trust_dns_proto::serialize::binary::{BinDecodable, BinEncodable};
 
 use dns_filter_cache::ResponseCache;
 use dns_filter_filter::RuleEngine;
-use dns_filter_upstream::Upstream;
+use dns_filter_metrics::{Metrics, QueryLabels};
+use dns_filter_storage::{QueryAction, QueryStore};
+use dns_filter_upstream::UpstreamManager;
 
 const MAX_UDP_PACKET: usize = 4096;
 const MAX_TCP_MESSAGE: u16 = 65535;
@@ -19,14 +22,20 @@ const MAX_TCP_MESSAGE: u16 = 65535;
 pub struct DnsServer {
     /// Listening address (e.g., "127.0.0.1:53")
     pub listen: String,
-    /// Rule engine for filtering
-    pub rules: Arc<RuleEngine>,
+    /// Rule engine for filtering (hot-swappable)
+    pub rules: Arc<ArcSwap<RuleEngine>>,
     /// DNS response cache
     pub cache: Arc<ResponseCache>,
     /// Upstream resolver
-    pub upstream: Arc<Upstream>,
+    pub upstream: Arc<UpstreamManager>,
     /// Query statistics logger
     pub stats: Arc<dns_filter_core::QueryLogger>,
+    /// Persistent query log store
+    pub store: Arc<QueryStore>,
+    /// Optional Prometheus metrics
+    pub metrics: Option<Arc<Metrics>>,
+    /// Enable query logging to the store
+    pub log_queries: bool,
 }
 
 /// Run the DNS server on both UDP and TCP
@@ -41,6 +50,9 @@ pub async fn run_server(server: DnsServer) -> anyhow::Result<()> {
         cache: Arc::clone(&server.cache),
         upstream: Arc::clone(&server.upstream),
         stats: Arc::clone(&server.stats),
+        store: Arc::clone(&server.store),
+        metrics: server.metrics.clone(),
+        log_queries: server.log_queries,
     };
     tokio::spawn(async move {
         if let Err(e) = run_udp_server(&server_udp).await {
@@ -68,6 +80,9 @@ async fn run_udp_server(server: &DnsServer) -> anyhow::Result<()> {
             cache: Arc::clone(&server.cache),
             upstream: Arc::clone(&server.upstream),
             stats: Arc::clone(&server.stats),
+            store: Arc::clone(&server.store),
+            metrics: server.metrics.clone(),
+            log_queries: server.log_queries,
         };
         let socket = Arc::clone(&socket);
 
@@ -93,6 +108,9 @@ async fn run_tcp_server(server: DnsServer) -> anyhow::Result<()> {
             cache: Arc::clone(&server.cache),
             upstream: Arc::clone(&server.upstream),
             stats: Arc::clone(&server.stats),
+            store: Arc::clone(&server.store),
+            metrics: server.metrics.clone(),
+            log_queries: server.log_queries,
         };
 
         tokio::spawn(async move {
@@ -114,7 +132,7 @@ async fn handle_udp_query(
         return Ok(());
     }
 
-    let response = match handle_dns_query(buf, server).await {
+    let response = match handle_dns_query(buf, server, Some(&peer_addr.ip().to_string())).await {
         Ok(resp) => resp,
         Err(e) => {
             tracing::debug!("DNS query error: {}", e);
@@ -131,6 +149,7 @@ async fn handle_tcp_client(
     socket: &mut tokio::net::TcpStream,
     server: &DnsServer,
 ) -> anyhow::Result<()> {
+    let client_ip = socket.peer_addr().ok().map(|a| a.ip().to_string());
     loop {
         let mut len_buf = [0; 2];
         match socket.read_exact(&mut len_buf).await {
@@ -152,7 +171,7 @@ async fn handle_tcp_client(
             break;
         }
 
-        match handle_dns_query(&query_buf, server).await {
+        match handle_dns_query(&query_buf, server, client_ip.as_deref()).await {
             Ok(response) => {
                 let response_len = (response.len() as u16).to_be_bytes();
                 if let Err(e) = socket.write_all(&response_len).await {
@@ -175,7 +194,11 @@ async fn handle_tcp_client(
 }
 
 /// Handle a single DNS query (shared logic for UDP and TCP)
-async fn handle_dns_query(buf: &[u8], server: &DnsServer) -> anyhow::Result<Vec<u8>> {
+async fn handle_dns_query(
+    buf: &[u8],
+    server: &DnsServer,
+    client_ip: Option<&str>,
+) -> anyhow::Result<Vec<u8>> {
     let req = match Message::from_bytes(buf) {
         Ok(msg) => msg,
         Err(_) => {
@@ -187,33 +210,107 @@ async fn handle_dns_query(buf: &[u8], server: &DnsServer) -> anyhow::Result<Vec<
         return Ok(formerr_response().to_bytes()?);
     }
 
-    if should_block(&req, &server.rules) {
+    let domain = req
+        .queries()
+        .first()
+        .map(|q| domain_from_name(q.name()))
+        .unwrap_or_default();
+    let query_type = req
+        .queries()
+        .first()
+        .map(|q| format!("{}", q.query_type()))
+        .unwrap_or_default();
+
+    let rules = server.rules.load();
+    if should_block(&req, &rules) {
         for query in req.queries() {
             server.stats.record_blocked(&domain_from_name(query.name()));
+        }
+        if server.log_queries {
+            let _ =
+                server
+                    .store
+                    .log_query(&domain, &query_type, QueryAction::Blocked, None, client_ip);
+        }
+        if let Some(ref m) = server.metrics {
+            m.queries_total
+                .get_or_create(&QueryLabels {
+                    action: "blocked".into(),
+                })
+                .inc();
         }
         let response_bytes = blocked_response(&req).to_bytes()?;
         return Ok(response_bytes);
     }
+    drop(rules);
 
     if let Some(cached) = server.cache.get(&req)? {
         server.stats.record_cache_hit();
-        tracing::debug!("Cache hit for query id {}", req.id());
+        if server.log_queries {
+            let _ =
+                server
+                    .store
+                    .log_query(&domain, &query_type, QueryAction::Cached, None, client_ip);
+        }
+        if let Some(ref m) = server.metrics {
+            m.cache_hits.inc();
+            m.queries_total
+                .get_or_create(&QueryLabels {
+                    action: "cached".into(),
+                })
+                .inc();
+        }
         return Ok(cached);
     }
 
     server.stats.record_cache_miss();
+    if let Some(ref m) = server.metrics {
+        m.cache_misses.inc();
+    }
 
+    let start = std::time::Instant::now();
     match server.upstream.forward(buf).await {
         Ok(response) => {
+            let elapsed = start.elapsed().as_millis() as u64;
             server.cache.insert(&req, response.clone());
-            for query in req.queries() {
-                let _domain = domain_from_name(query.name());
-                server.stats.record_allowed();
+            server.stats.record_allowed();
+            if server.log_queries {
+                let _ = server.store.log_query(
+                    &domain,
+                    &query_type,
+                    QueryAction::Allowed,
+                    Some(elapsed),
+                    client_ip,
+                );
+            }
+            if let Some(ref m) = server.metrics {
+                m.queries_total
+                    .get_or_create(&QueryLabels {
+                        action: "allowed".into(),
+                    })
+                    .inc();
+                m.query_duration_ms.observe(elapsed as f64);
             }
             Ok(response)
         }
         Err(e) => {
             tracing::debug!("Upstream error: {}", e);
+            if server.log_queries {
+                let _ = server.store.log_query(
+                    &domain,
+                    &query_type,
+                    QueryAction::Error,
+                    None,
+                    client_ip,
+                );
+            }
+            if let Some(ref m) = server.metrics {
+                m.queries_total
+                    .get_or_create(&QueryLabels {
+                        action: "error".into(),
+                    })
+                    .inc();
+            }
             Ok(servfail_response(&req).to_bytes()?)
         }
     }
@@ -301,6 +398,7 @@ mod tests {
     use super::*;
     use dns_filter_core::ExactMatcher;
     use dns_filter_filter::ExceptionMatcher;
+    use dns_filter_storage::QueryStore;
     use std::time::Duration;
     use trust_dns_proto::op::Query;
     use trust_dns_proto::rr::record_type::RecordType;
@@ -322,7 +420,7 @@ mod tests {
     }
 
     fn test_server() -> DnsServer {
-        let rules = Arc::new(RuleEngine::new(
+        let rules = Arc::new(ArcSwap::new(Arc::new(RuleEngine::new(
             Arc::new(ExceptionMatcher::new()),
             vec![(
                 "exact".to_string(),
@@ -331,10 +429,16 @@ mod tests {
                     "tracker.example.com".to_string(),
                 ])) as Arc<dyn dns_filter_core::Matcher>,
             )],
-        ));
+        ))));
         let cache = Arc::new(ResponseCache::new(Duration::from_secs(300)));
-        let upstream = Arc::new(Upstream::new("1.1.1.1:53".parse::<SocketAddr>().unwrap()));
+        let upstream = Arc::new(UpstreamManager::new(vec![
+            dns_filter_upstream::UpstreamConfig::new(
+                dns_filter_upstream::Protocol::Udp,
+                "1.1.1.1:53",
+            ),
+        ]));
         let stats = Arc::new(dns_filter_core::QueryLogger::new());
+        let store = Arc::new(QueryStore::in_memory().unwrap());
 
         DnsServer {
             listen: "127.0.0.1:0".to_string(),
@@ -342,6 +446,9 @@ mod tests {
             cache,
             upstream,
             stats,
+            store,
+            metrics: None,
+            log_queries: false,
         }
     }
 
@@ -511,7 +618,7 @@ mod tests {
         let server = test_server();
         let req = create_query("ads.example.com");
         let bytes = req.to_bytes().unwrap();
-        let response = handle_dns_query(&bytes, &server).await.unwrap();
+        let response = handle_dns_query(&bytes, &server, None).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
         assert_eq!(parsed.response_code(), ResponseCode::NXDomain);
     }
@@ -521,7 +628,7 @@ mod tests {
         let server = test_server();
         let req = create_query("example.com");
         let bytes = req.to_bytes().unwrap();
-        let response = handle_dns_query(&bytes, &server).await.unwrap();
+        let response = handle_dns_query(&bytes, &server, None).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
         assert_eq!(parsed.message_type(), MessageType::Response);
         assert_ne!(parsed.response_code(), ResponseCode::FormErr);
@@ -532,7 +639,7 @@ mod tests {
     async fn test_handle_dns_query_formerr_on_garbage() {
         let server = test_server();
         let garbage = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-        let response = handle_dns_query(&garbage, &server).await.unwrap();
+        let response = handle_dns_query(&garbage, &server, None).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
         assert_eq!(parsed.response_code(), ResponseCode::FormErr);
     }
@@ -540,7 +647,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_dns_query_formerr_on_empty() {
         let server = test_server();
-        let response = handle_dns_query(&[], &server).await.unwrap();
+        let response = handle_dns_query(&[], &server, None).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
         assert_eq!(parsed.response_code(), ResponseCode::FormErr);
     }
@@ -551,7 +658,7 @@ mod tests {
         let req = create_query("example.com");
         let resp = blocked_response(&req);
         let bytes = resp.to_bytes().unwrap();
-        let response = handle_dns_query(&bytes, &server).await.unwrap();
+        let response = handle_dns_query(&bytes, &server, None).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
         assert_eq!(parsed.response_code(), ResponseCode::FormErr);
     }
@@ -563,7 +670,7 @@ mod tests {
         msg.set_id(1);
         msg.set_message_type(MessageType::Query);
         let bytes = msg.to_bytes().unwrap();
-        let response = handle_dns_query(&bytes, &server).await.unwrap();
+        let response = handle_dns_query(&bytes, &server, None).await.unwrap();
         let parsed = Message::from_bytes(&response).unwrap();
         assert_eq!(parsed.response_code(), ResponseCode::FormErr);
     }

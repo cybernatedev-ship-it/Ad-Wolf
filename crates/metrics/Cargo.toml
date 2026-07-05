@@ -1,0 +1,12 @@
+[package]
+name = "dns-filter-metrics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+prometheus-client.workspace = true
+tokio.workspace = true
+tracing.workspace = true

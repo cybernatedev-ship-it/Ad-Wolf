@@ -29,6 +29,15 @@ pub struct Config {
     /// Rule lists
     #[serde(default)]
     pub lists: Vec<ListConfig>,
+    /// Path to query log database (empty = in-memory only)
+    #[serde(default)]
+    pub storage_path: Option<String>,
+    /// Prometheus metrics listen address (empty = disabled)
+    #[serde(default = "default_metrics_addr")]
+    pub metrics_addr: String,
+    /// Prune query log entries older than this many days (0 = never prune)
+    #[serde(default)]
+    pub prune_days: u64,
 }
 
 fn default_listen() -> String {
@@ -52,6 +61,10 @@ fn default_upstream() -> Vec<UpstreamConfig> {
 
 fn default_lists_dir() -> String {
     "lists".to_string()
+}
+
+fn default_metrics_addr() -> String {
+    "127.0.0.1:9120".to_string()
 }
 
 /// Upstream resolver configuration
@@ -86,6 +99,9 @@ impl Default for Config {
             upstream: default_upstream(),
             lists_dir: default_lists_dir(),
             lists: vec![],
+            storage_path: None,
+            metrics_addr: default_metrics_addr(),
+            prune_days: 0,
         }
     }
 }
@@ -210,6 +226,7 @@ mod tests {
         assert_eq!(config.cache_ttl, parsed.cache_ttl);
         assert_eq!(config.lists_dir, parsed.lists_dir);
         assert_eq!(config.upstream.len(), parsed.upstream.len());
+        assert_eq!(config.metrics_addr, parsed.metrics_addr);
     }
 
     #[test]
@@ -295,5 +312,20 @@ listen = "127.0.0.1:53"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.lists_dir, "lists");
+    }
+
+    #[test]
+    fn test_metrics_addr_default() {
+        let config = Config::default();
+        assert_eq!(config.metrics_addr, "127.0.0.1:9120");
+    }
+
+    #[test]
+    fn test_metrics_addr_custom() {
+        let toml_str = r#"
+metrics_addr = "0.0.0.0:9090"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.metrics_addr, "0.0.0.0:9090");
     }
 }

@@ -15,3 +15,6 @@ dns-filter-core = { path = "../core" }
 dns-filter-filter = { path = "../filter" }
 dns-filter-cache = { path = "../cache" }
 dns-filter-upstream = { path = "../upstream" }
+dns-filter-metrics = { path = "../metrics" }
+dns-filter-storage = { path = "../storage" }
+arc-swap.workspace = true

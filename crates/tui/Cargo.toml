@@ -1,0 +1,14 @@
+[package]
+name = "dns-filter-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Terminal UI dashboard for Ad-Wolf DNS filter"
+
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+anyhow.workspace = true
+clap.workspace = true
+dns-filter-storage = { path = "../storage" }
