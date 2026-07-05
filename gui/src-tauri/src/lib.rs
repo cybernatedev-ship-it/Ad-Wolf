@@ -24,7 +24,10 @@ fn get_stats(state: State<AppState>) -> Result<serde_json::Value, String> {
 
 /// Get recent log entries
 #[tauri::command]
-fn get_recent(state: State<AppState>, limit: Option<usize>) -> Result<Vec<serde_json::Value>, String> {
+fn get_recent(
+    state: State<AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
     let entries = state
         .store
         .recent(limit.unwrap_or(50))
@@ -48,7 +51,10 @@ fn get_recent(state: State<AppState>, limit: Option<usize>) -> Result<Vec<serde_
 
 /// Get top blocked domains
 #[tauri::command]
-fn get_top_blocked(state: State<AppState>, limit: Option<usize>) -> Result<Vec<serde_json::Value>, String> {
+fn get_top_blocked(
+    state: State<AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
     let entries = state
         .store
         .top_blocked(limit.unwrap_or(10))
