@@ -73,7 +73,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ad-wolf-linux
-          path: gui/src-tauri/target/release/bundle/
+          path: target/release/bundle/
 
   package-windows:
     runs-on: windows-latest
@@ -101,7 +101,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ad-wolf-windows
-          path: gui/src-tauri/target/release/bundle/
+          path: target/release/bundle/
 
   package-macos:
     runs-on: macos-latest
@@ -128,7 +128,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ad-wolf-macos
-          path: gui/src-tauri/target/release/bundle/
+          path: target/release/bundle/
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -147,9 +147,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          shopt -s nullglob
+          files=(artifacts/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No artifacts found, skipping release."
+            exit 0
+          fi
           TAG="v$(date +%Y%m%d.%H%M)"
           gh release create "$TAG" \
             --title "Ad-Wolf $TAG" \
             --notes "Auto-built release from main branch." \
             --generate-notes \
-            artifacts/*
+            "${files[@]}"
