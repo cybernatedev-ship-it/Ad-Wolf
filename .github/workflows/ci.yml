@@ -29,36 +29,78 @@ jobs:
       - name: Test
         run: cargo test
 
-  package:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: dns-filter-linux-x86_64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: dns-filter-windows-x86_64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: dns-filter-macos-x86_64
-    runs-on: ${{ matrix.os }}
+  package-deb:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: ${{ matrix.target }}
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
       - name: Build release
-        run: cargo build --release --target ${{ matrix.target }}
-      - name: Upload release binary
+        run: cargo build --release
+      - name: Build .deb
+        run: cargo deb --output artifacts/dns-filter.deb
+      - name: Upload .deb
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: target/${{ matrix.target }}/release/dns-filter${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          name: dns-filter-amd64.deb
+          path: artifacts/dns-filter.deb
+
+  package-rpm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install cargo-generate-rpm
+        run: cargo install cargo-generate-rpm
+      - name: Build release
+        run: cargo build --release
+      - name: Build .rpm
+        run: cargo generate-rpm --output artifacts/dns-filter.rpm
+      - name: Upload .rpm
+        uses: actions/upload-artifact@v4
+        with:
+          name: dns-filter-x86_64.rpm
+          path: artifacts/dns-filter.rpm
+
+  package-msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install cargo-wix
+        run: cargo install cargo-wix
+      - name: Build release
+        run: cargo build --release
+      - name: Build .msi
+        run: cargo wix --no-banner --output artifacts/dns-filter.msi
+      - name: Upload .msi
+        uses: actions/upload-artifact@v4
+        with:
+          name: dns-filter-x86_64.msi
+          path: artifacts/dns-filter.msi
+
+  package-dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Build release
+        run: cargo build --release
+      - name: Build .pkg
+        run: |
+          mkdir -p artifacts/pkgroot/usr/local/bin
+          cp target/release/dns-filter artifacts/pkgroot/usr/local/bin/
+          pkgbuild --root artifacts/pkgroot --identifier com.ad-wolf.dns-filter --version 0.1.0 --install-location / artifacts/dns-filter.pkg
+      - name: Upload .pkg
+        uses: actions/upload-artifact@v4
+        with:
+          name: dns-filter-x86_64.pkg
+          path: artifacts/dns-filter.pkg
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [check, package]
+    needs: [check, package-deb, package-rpm, package-msi, package-dmg]
     runs-on: ubuntu-latest
     permissions:
       contents: write

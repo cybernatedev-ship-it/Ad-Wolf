@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Name="Ad-Wolf DNS Filter"
+    Id="*"
+    UpgradeCode="12345678-1234-1234-1234-123456789abc"
+    Language="1033"
+    Codepage="1252"
+    Version="0.1.0"
+    Manufacturer="DNS Filter Contributors">
+    <Package
+      InstallerVersion="200"
+      Compressed="yes"
+      InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+    <Media Id="1" Cabinet="product.cab" EmbedCab="yes" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="Ad-Wolf">
+          <Component Id="MainBinary" Guid="*">
+            <File Id="dns_filter_exe" Source="target/release/dns-filter.exe" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="MainFeature" Level="1">
+      <ComponentRef Id="MainBinary" />
+    </Feature>
+  </Product>
+</Wix>
