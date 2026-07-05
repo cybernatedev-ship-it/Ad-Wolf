@@ -305,7 +305,35 @@ async fn main() -> anyhow::Result<()> {
         log_queries: config.log_queries,
     };
 
-    dns_filter_dns::run_server(server).await?;
+    let mut server_handle = tokio::spawn(dns_filter_dns::run_server(server));
 
+    // Wait for shutdown signal
+    let ctrl_c = tokio::signal::ctrl_c();
+    let term = shutdown_signal();
+    tokio::pin!(term);
+
+    tokio::select! {
+        _ = ctrl_c => tracing::info!("Received Ctrl+C, shutting down..."),
+        _ = &mut term => tracing::info!("Received SIGTERM, shutting down..."),
+        result = &mut server_handle => result??,
+    }
+
+    tracing::info!("Shutdown complete.");
     Ok(())
+}
+
+/// Return a future that resolves on SIGTERM (Unix), or never resolves on other platforms
+fn shutdown_signal() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    #[cfg(unix)]
+    {
+        let mut sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to register SIGTERM handler");
+        Box::pin(async move {
+            sig.recv().await;
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        Box::pin(std::future::pending())
+    }
 }

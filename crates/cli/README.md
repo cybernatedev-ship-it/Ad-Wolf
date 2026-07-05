@@ -1,15 +1,14 @@
-# dns-filter-cli
+# dns-filter
 
-Command-line interface for DNS filtering daemon.
-
-## Building
+Command-line DNS filtering daemon.
 
 ```bash
-cargo build --release
-```
+# With auto-detected config
+dns-filter
 
-## Running
+# With explicit config
+dns-filter -c /etc/dns-filter/config.toml
 
-```bash
-cargo run
+# With all overrides
+dns-filter -l 0.0.0.0:53 -r ./lists --db ./queries.db --metrics-addr :9120
 ```

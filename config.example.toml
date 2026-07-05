@@ -1,0 +1,65 @@
+# Ad-Wolf DNS Filter — Configuration
+#
+# Copy this file to one of the following locations:
+#   - ./config.toml (current directory)
+#   - ./dns-filter.toml
+#   - ~/.config/dns-filter/config.toml
+#   - /etc/dns-filter/config.toml
+
+# Listening address (default: "127.0.0.1:53")
+# Use "0.0.0.0:53" to listen on all interfaces (requires root/CAP_NET_BIND_SERVICE).
+listen = "127.0.0.1:53"
+
+# Enable DNS response caching (default: true)
+cache = true
+
+# Cache TTL in seconds (default: 300)
+cache_ttl = 300
+
+# Log all DNS queries to the database (default: false)
+log_queries = true
+
+# Path to the SQLite query log database (empty = in-memory only)
+storage_path = "/var/lib/dns-filter/queries.db"
+
+# Prune query log entries older than this many days (0 = never prune)
+prune_days = 30
+
+# Prometheus metrics endpoint address (empty = disabled)
+metrics_addr = "127.0.0.1:9120"
+
+# Directory to scan for rule list files
+lists_dir = "lists"
+
+# Upstream DNS resolvers (used in order, with failover)
+[[upstream]]
+protocol = "udp"
+address = "1.1.1.1:53"
+
+[[upstream]]
+protocol = "tls"
+address = "1.1.1.1:853"
+
+[[upstream]]
+protocol = "https"
+address = "https://cloudflare-dns.com/dns-query"
+
+[[upstream]]
+protocol = "udp"
+address = "8.8.8.8:53"
+
+# Remote rule lists (downloaded at startup and periodically)
+[[lists]]
+name = "adblock"
+path = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+enabled = true
+
+[[lists]]
+name = "tracking"
+path = "lists/tracking.txt"
+enabled = true
+
+[[lists]]
+name = "custom"
+path = "lists/custom.txt"
+enabled = false
