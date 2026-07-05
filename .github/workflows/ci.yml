@@ -38,6 +38,7 @@ jobs:
         run: cargo install tauri-cli --version "^2"
       - name: Build daemon binary
         run: cargo build --release --bin dns-filter
+        working-directory: ${{ github.workspace }}
       - name: Copy daemon to Tauri sidecar
         run: |
           mkdir -p gui/src-tauri/binaries
@@ -63,6 +64,7 @@ jobs:
         run: cargo install tauri-cli --version "^2"
       - name: Build daemon binary
         run: cargo build --release --bin dns-filter
+        working-directory: ${{ github.workspace }}
       - name: Copy daemon to Tauri sidecar
         shell: pwsh
         run: |
@@ -89,6 +91,7 @@ jobs:
         run: cargo install tauri-cli --version "^2"
       - name: Build daemon binary
         run: cargo build --release --bin dns-filter
+        working-directory: ${{ github.workspace }}
       - name: Copy daemon to Tauri sidecar
         run: |
           mkdir -p gui/src-tauri/binaries
