@@ -68,17 +68,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Create release tag
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="v$(date +%Y%m%d.%H%M)"
-          echo "tag=$VERSION" >> $GITHUB_ENV
-          echo "Creating release $VERSION"
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.tag }}
-          name: Ad-Wolf ${{ env.tag }}
-          body: "Auto-built release from main branch."
-          files: artifacts/**/*
-          generate_release_notes: true
-          fail_on_unmatched_files: false
+          TAG="v$(date +%Y%m%d.%H%M)"
+          gh release create "$TAG" \
+            --title "Ad-Wolf $TAG" \
+            --notes "Auto-built release from main branch." \
+            --generate-notes \
+            artifacts/*
