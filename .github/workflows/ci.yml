@@ -29,78 +29,93 @@ jobs:
       - name: Test
         run: cargo test
 
-  package-deb:
+  package-linux:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gui
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Install cargo-deb
-        run: cargo install cargo-deb
-      - name: Build release
-        run: cargo build --release
-      - name: Build .deb
-        run: cargo deb --output artifacts/dns-filter.deb
-      - name: Upload .deb
-        uses: actions/upload-artifact@v4
-        with:
-          name: dns-filter-amd64.deb
-          path: artifacts/dns-filter.deb
-
-  package-rpm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Install cargo-generate-rpm
-        run: cargo install cargo-generate-rpm
-      - name: Build release
-        run: cargo build --release
-      - name: Build .rpm
-        run: cargo generate-rpm --output artifacts/dns-filter.rpm
-      - name: Upload .rpm
-        uses: actions/upload-artifact@v4
-        with:
-          name: dns-filter-x86_64.rpm
-          path: artifacts/dns-filter.rpm
-
-  package-msi:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Install cargo-wix
-        run: cargo install cargo-wix
-      - name: Build release
-        run: cargo build --release
-      - name: Build .msi
-        run: cargo wix --no-banner --output artifacts/dns-filter.msi
-      - name: Upload .msi
-        uses: actions/upload-artifact@v4
-        with:
-          name: dns-filter-x86_64.msi
-          path: artifacts/dns-filter.msi
-
-  package-dmg:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Build release
-        run: cargo build --release
-      - name: Build .pkg
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2"
+      - name: Build daemon binary
+        run: cargo build --release --bin dns-filter
+        working-directory: ..
+      - name: Copy daemon to Tauri sidecar
         run: |
-          mkdir -p artifacts/pkgroot/usr/local/bin
-          cp target/release/dns-filter artifacts/pkgroot/usr/local/bin/
-          pkgbuild --root artifacts/pkgroot --identifier com.ad-wolf.dns-filter --version 0.1.0 --install-location / artifacts/dns-filter.pkg
-      - name: Upload .pkg
+          mkdir -p src-tauri/binaries
+          cp ../target/release/dns-filter src-tauri/binaries/dns-filter-x86_64-unknown-linux-gnu
+      - name: Install frontend deps
+        run: npm install
+      - name: Build Tauri app (GUI + CLI daemon)
+        run: cargo tauri build
+        working-directory: src-tauri
+      - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
-          name: dns-filter-x86_64.pkg
-          path: artifacts/dns-filter.pkg
+          name: ad-wolf-linux
+          path: src-tauri/target/release/bundle/
+
+  package-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: gui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2"
+      - name: Build daemon binary
+        run: cargo build --release --bin dns-filter
+        working-directory: ..
+      - name: Copy daemon to Tauri sidecar
+        run: |
+          mkdir -p src-tauri/binaries
+          copy ..\target\release\dns-filter.exe src-tauri\binaries\dns-filter-x86_64-pc-windows-msvc.exe
+      - name: Install frontend deps
+        run: npm install
+      - name: Build Tauri app (GUI + CLI daemon)
+        run: cargo tauri build
+        working-directory: src-tauri
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: ad-wolf-windows
+          path: src-tauri/target/release/bundle/
+
+  package-macos:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: gui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2"
+      - name: Build daemon binary
+        run: cargo build --release --bin dns-filter
+        working-directory: ..
+      - name: Copy daemon to Tauri sidecar
+        run: |
+          mkdir -p src-tauri/binaries
+          cp ../target/release/dns-filter src-tauri/binaries/dns-filter-x86_64-apple-darwin
+      - name: Install frontend deps
+        run: npm install
+      - name: Build Tauri app (GUI + CLI daemon)
+        run: cargo tauri build
+        working-directory: src-tauri
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: ad-wolf-macos
+          path: src-tauri/target/release/bundle/
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [check, package-deb, package-rpm, package-msi, package-dmg]
+    needs: [check, package-linux, package-windows, package-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write

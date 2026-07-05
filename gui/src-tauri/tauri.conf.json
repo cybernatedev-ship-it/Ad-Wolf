@@ -32,6 +32,9 @@
       "icons/icon_128.png",
       "icons/icon_256.png",
       "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/dns-filter"
     ]
   }
 }
