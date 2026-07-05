@@ -13,12 +13,12 @@ pub struct AppState {
 /// Get query statistics (blocked, allowed, cached totals)
 #[tauri::command]
 fn get_stats(state: State<AppState>) -> Result<serde_json::Value, String> {
-    let stats = state.stats.snapshot();
+    let stats = state.stats.get_stats();
     Ok(serde_json::json!({
-        "total": stats.total,
-        "blocked": stats.blocked,
-        "allowed": stats.allowed,
-        "cached": stats.cached,
+        "total": stats.total_queries,
+        "blocked": stats.total_blocked,
+        "allowed": stats.total_allowed,
+        "cached": stats.cache_hits,
     }))
 }
 
