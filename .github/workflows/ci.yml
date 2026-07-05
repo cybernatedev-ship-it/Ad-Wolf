@@ -147,9 +147,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          shopt -s nullglob
-          files=(artifacts/*)
-          if [ ${#files[@]} -eq 0 ]; then
+          files=$(find artifacts -type f)
+          if [ -z "$files" ]; then
             echo "No artifacts found, skipping release."
             exit 0
           fi
@@ -158,4 +157,4 @@ jobs:
             --title "Ad-Wolf $TAG" \
             --notes "Auto-built release from main branch." \
             --generate-notes \
-            "${files[@]}"
+            $files
