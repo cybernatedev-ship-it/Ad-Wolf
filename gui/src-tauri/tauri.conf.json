@@ -10,7 +10,6 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "title": "Ad-Wolf DNS Filter",
     "windows": [
       {
         "title": "Ad-Wolf",
