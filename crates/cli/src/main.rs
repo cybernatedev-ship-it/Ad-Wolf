@@ -14,6 +14,7 @@ use dns_filter_filter::RuleEngine;
 use dns_filter_storage::QueryStore;
 use dns_filter_upstream::{UpstreamConfig, UpstreamManager};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
+#[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
 
 const LIST_UPDATE_INTERVAL: Duration = Duration::from_secs(6 * 3600);
@@ -136,7 +137,8 @@ async fn watch_rules(rules: Arc<ArcSwap<RuleEngine>>, dir: PathBuf) -> anyhow::R
     Ok(())
 }
 
-/// Run the SIGHUP signal handler for hot reload
+/// Run the SIGHUP signal handler for hot reload (Unix only)
+#[cfg(unix)]
 async fn watch_sighup(rules: Arc<ArcSwap<RuleEngine>>, dir: PathBuf) -> anyhow::Result<()> {
     let mut sig = signal(SignalKind::hangup())?;
     loop {
@@ -280,13 +282,16 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let sighup_dir = rules_dir.clone();
-    let rules_sighup = Arc::clone(&rules);
-    tokio::spawn(async move {
-        if let Err(e) = watch_sighup(rules_sighup, sighup_dir).await {
-            tracing::error!("SIGHUP handler error: {}", e);
-        }
-    });
+    #[cfg(unix)]
+    {
+        let sighup_dir = rules_dir.clone();
+        let rules_sighup = Arc::clone(&rules);
+        tokio::spawn(async move {
+            if let Err(e) = watch_sighup(rules_sighup, sighup_dir).await {
+                tracing::error!("SIGHUP handler error: {}", e);
+            }
+        });
+    }
 
     // Build and run server
     let server = DnsServer {

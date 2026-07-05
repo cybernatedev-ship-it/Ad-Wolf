@@ -55,9 +55,30 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: target/${{ matrix.target }}/release/dns-filter${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-      - name: Upload release binary (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [check, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: target/${{ matrix.target }}/release/dns-filter.exe
+          path: artifacts
+      - name: Create release tag
+        run: |
+          VERSION="v$(date +%Y%m%d.%H%M)"
+          echo "tag=$VERSION" >> $GITHUB_ENV
+          echo "Creating release $VERSION"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.tag }}
+          name: Ad-Wolf ${{ env.tag }}
+          body: "Auto-built release from main branch."
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false
