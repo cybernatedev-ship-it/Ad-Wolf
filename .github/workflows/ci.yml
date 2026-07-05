@@ -31,9 +31,6 @@ jobs:
 
   package-linux:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: gui
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -41,27 +38,24 @@ jobs:
         run: cargo install tauri-cli --version "^2"
       - name: Build daemon binary
         run: cargo build --release --bin dns-filter
-        working-directory: ..
       - name: Copy daemon to Tauri sidecar
         run: |
-          mkdir -p src-tauri/binaries
-          cp ../target/release/dns-filter src-tauri/binaries/dns-filter-x86_64-unknown-linux-gnu
+          mkdir -p gui/src-tauri/binaries
+          cp target/release/dns-filter gui/src-tauri/binaries/dns-filter-x86_64-unknown-linux-gnu
       - name: Install frontend deps
         run: npm install
+        working-directory: gui
       - name: Build Tauri app (GUI + CLI daemon)
         run: cargo tauri build
-        working-directory: src-tauri
+        working-directory: gui/src-tauri
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
           name: ad-wolf-linux
-          path: src-tauri/target/release/bundle/
+          path: gui/src-tauri/target/release/bundle/
 
   package-windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: gui
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -69,27 +63,25 @@ jobs:
         run: cargo install tauri-cli --version "^2"
       - name: Build daemon binary
         run: cargo build --release --bin dns-filter
-        working-directory: ..
       - name: Copy daemon to Tauri sidecar
+        shell: pwsh
         run: |
-          mkdir -p src-tauri/binaries
-          copy ..\target\release\dns-filter.exe src-tauri\binaries\dns-filter-x86_64-pc-windows-msvc.exe
+          New-Item -ItemType Directory -Force -Path gui/src-tauri/binaries
+          Copy-Item target/release/dns-filter.exe gui/src-tauri/binaries/dns-filter-x86_64-pc-windows-msvc.exe
       - name: Install frontend deps
         run: npm install
+        working-directory: gui
       - name: Build Tauri app (GUI + CLI daemon)
         run: cargo tauri build
-        working-directory: src-tauri
+        working-directory: gui/src-tauri
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
           name: ad-wolf-windows
-          path: src-tauri/target/release/bundle/
+          path: gui/src-tauri/target/release/bundle/
 
   package-macos:
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: gui
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -97,21 +89,21 @@ jobs:
         run: cargo install tauri-cli --version "^2"
       - name: Build daemon binary
         run: cargo build --release --bin dns-filter
-        working-directory: ..
       - name: Copy daemon to Tauri sidecar
         run: |
-          mkdir -p src-tauri/binaries
-          cp ../target/release/dns-filter src-tauri/binaries/dns-filter-x86_64-apple-darwin
+          mkdir -p gui/src-tauri/binaries
+          cp target/release/dns-filter gui/src-tauri/binaries/dns-filter-x86_64-apple-darwin
       - name: Install frontend deps
         run: npm install
+        working-directory: gui
       - name: Build Tauri app (GUI + CLI daemon)
         run: cargo tauri build
-        working-directory: src-tauri
+        working-directory: gui/src-tauri
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
           name: ad-wolf-macos
-          path: src-tauri/target/release/bundle/
+          path: gui/src-tauri/target/release/bundle/
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
